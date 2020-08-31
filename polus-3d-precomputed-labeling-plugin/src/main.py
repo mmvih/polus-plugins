@@ -3,6 +3,8 @@ from pathlib import Path
 import filepattern
 import os
 from filepattern import FilePattern as fp
+# import tifffile as tiff
+import numpy as np
 
 
 # Initialize the logger    
@@ -36,27 +38,27 @@ def main():
     imagetype = args.image_type
 
     # Get Variables of Images
-    regex = filepattern.get_regex(pattern = imagepattern)
-    regexzero = regex[0]
-    regexone = regex[1]
-    vars_instack = ''
-    stack_by = ''
-    for item in regexone:
-        if (item == 'x' or item == 'y') or item == 'z':
-            vars_instack = vars_instack + item
-        else:
-            stack_by = stack_by + item
+    # regex = filepattern.get_regex(pattern = imagepattern)
+    # regexzero = regex[0]
+    # regexone = regex[1]
+    # vars_instack = ''
+    # stack_by = ''
+    # for item in regexone:
+    #     if (item == 'x' or item == 'y') or item == 'z':
+    #         vars_instack = vars_instack + item
+    #     else:
+    #         stack_by = stack_by + item
 
     logger.info('input_dir = {}'.format(input_dir))
     logger.info('output_dir = {}'.format(output_dir))
     logger.info('pyramid_type = {}'.format(pyramid_type))
     logger.info('image pattern = {}'.format(imagepattern))
-    logger.info('images are stacked by variable(s) {}'.format(stack_by))
+    # logger.info('images are stacked by variable(s) {}'.format(stack_by))
     
     # Get list of images that we are going to through
     logger.info('Getting the images...')
     image_path = Path(input_dir)
-    images = [i for i in image_path.iterdir()]
+    images = [i for i in image_path.iterdir() if "".join(i.suffixes)==".Labels.ome.tif"]
     images.sort()
 
     # Set up lists for tracking processes
@@ -87,16 +89,18 @@ def main():
             logger.info("Finished Z stack process {} of {} in {}s!".format(pnum,len(images),time.time() - process_timer[free_process]))
             del processes[free_process]
             del process_timer[free_process]
-            
-        processes.append(subprocess.Popen("python3 build_pyramid.py --inpDir '{}' --outDir '{}' --pyramidType '{}' --imageNum '{}' --stackby '{}' --imagepattern '{}' --image '{}' --imagetype {}".format(input_dir,
-                                                                                                                                            output_dir,
-                                                                                                                                            pyramid_type,
-                                                                                                                                            im_count,
-                                                                                                                                            stack_by,
-                                                                                                                                            imagepattern,
-                                                                                                                                            image.name,
-                                                                                                                                            imagetype),
-                                                                                                                                        shell=True))
+        try:
+            processes.append(subprocess.Popen("python3 build_pyramid.py --inpDir '{}' --outDir '{}' --pyramidType '{}' --imageNum '{}' --imagepattern '{}' --image '{}' --imagetype {}".format(input_dir,
+                                                                                                                                                output_dir,
+                                                                                                                                                pyramid_type,
+                                                                                                                                                im_count,
+                                                                                                                                                imagepattern,
+                                                                                                                                                image.name,
+                                                                                                                                                imagetype),
+                                                                                                                                            shell=True))
+        except:
+            raise Exception("Previous process in build-pyramid.py input is wrong")
+            exit()
         im_count += 1
         process_timer.append(time.time())
         stack_count = stack_count + 1

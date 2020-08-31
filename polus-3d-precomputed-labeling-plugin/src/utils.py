@@ -17,7 +17,43 @@ UNITS = {'m':  10**9,
          'Å':  10**-1}
 
 # Chunk Scale
-CHUNK_SIZE = 64
+CHUNK_SIZE = 128
+
+def segmentinfo(encoder,idlabels,out_dir):
+
+    op = Path(out_dir).joinpath("infodir")
+    # op = Path(encoder.info["segment_properties"])
+    op.mkdir()
+    op = op.joinpath("info")
+
+    inlineinfo = {
+        "ids":[str(item) for item in idlabels],
+        "properties":[
+            {
+            "id":"label",
+            "type":"label",
+            "values":[str(item) for item in idlabels]
+            },
+            {
+            "id":"description",
+            "type":"label",
+            "values": [str(item) for item in idlabels]
+            }
+        ]
+    }
+
+    info = {
+        "@type": "neuroglancer_segment_properties",
+        "inline": inlineinfo
+    }
+
+    with open(op,'w') as writer:
+        writer.write(json.dumps(info))
+    writer.close()
+
+    return op
+
+
 def squeeze_generic(a, axes_to_keep):
     out_s = [s for i,s in enumerate(a.shape) if i in axes_to_keep or s!=1]
     return a.reshape(out_s)
@@ -50,6 +86,18 @@ def _avg2(image):
                                                 image[1:y_max:2  ,0:x_max-1:2,1:z_max:2] + \
                                                 image[0:y_max-1:2,1:x_max:2  ,1:z_max:2] + \
                                                 image[1:y_max:2  ,1:x_max:2  ,1:z_max:2])/8
+
+    if z_max != image.shape[2]:
+        avg_img[-1,-1,:int(z_max/2)] = (image[-1,-1,0:z_max-1:2] + \
+                           image[-1,-1,1:z_max:2])/2
+    if y_max != image.shape[0]:
+        avg_img[-1,:int(x_max/2),-1] = (image[-1,0:x_max-1:2,-1] + \
+                                     image[-1,1:x_max:2,-1])/2
+    if x_max != image.shape[1]:
+        avg_img[:int(y_max/2),-1,-1] = (image[0:y_max-1:2,-1,-1] + \
+                                     image[1:y_max:2,-1,-1]) / 2
+    if (y_max != image.shape[0] and x_max != image.shape[1]) and (z_max != image.shape[2]):
+        avg_img[-1,-1,-1] = image[-1,-1,-1]
 
     return avg_img
 
@@ -143,6 +191,8 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder, X=None,Y=None,Z=None):
                                                 bfio_reader=bfio_reader,
                                                 slide_writer=slide_writer,
                                                 encoder=encoder)
+                    # print("Sub_Image Shape: ", sub_image.shape)
+                    # print("Trying to fit into: ", image[y_ind[0]:y_ind[1],x_ind[0]:x_ind[1],z_ind[0]:z_ind[1]].shape)
                     image[y_ind[0]:y_ind[1],x_ind[0]:x_ind[1],z_ind[0]:z_ind[1]] = _avg2(sub_image)
 
     # Encode the chunk
@@ -150,6 +200,7 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder, X=None,Y=None,Z=None):
     slide_writer.store_chunk(image_encoded,str(S),(X[0],X[1],Y[0],Y[1],Z[0],Z[1]))
     print(S, str(X[0])+ "-" + str(X[1])+ "-" + str(Y[0]) + "_" + str(Y[1])+ "_" + str(Z[0]) + "-" + str(Z[1]))
 
+    # print(" ")
     return image
 
 # Modified and condensed from FileAccessor class in neuroglancer-scripts
@@ -214,6 +265,7 @@ class NeuroglancerWriter(PyramidWriter):
         os.makedirs(str(chunk_path.parent), exist_ok=True)
         with open(str(chunk_path.with_name(chunk_path.name)),'wb') as f:
             f.write(buf)
+        f.close()
 
 class DeepZoomWriter(PyramidWriter):
     """ Method to write a DeepZoom pyramid
@@ -355,10 +407,12 @@ def bfio_metadata_to_slide_info(bfio_reader,outPath,stackheight,imagetype):
     
     # initialize the json dictionary
     info = {
+        "@type": "neuroglancer_multiscale_volume",
         "data_type": dtype,
         "num_channels":1,
         "scales": [scales],       # Will build scales below
-        "type": imagetype
+        "type": imagetype,
+        "segment_properties": "infodir"
     }
     
     for i in range(1,num_scales+1):
@@ -386,6 +440,7 @@ def neuroglancer_info_file(bfio_reader,outPath, stackheight, imagetype):
     # Write the neuroglancer info file
     with open(op,'w') as writer:
         writer.write(json.dumps(info))
+    writer.close()
     return info
 
 def dzi_file(bfio_reader,outPath,imageNum):
@@ -401,5 +456,6 @@ def dzi_file(bfio_reader,outPath,imageNum):
     # write the dzi file
     with open(op,'w') as writer:
         writer.write(DZI.format(CHUNK_SIZE,info['scales'][0]['size'][0],info['scales'][0]['size'][1]))
+    writer.close()
         
     return info
