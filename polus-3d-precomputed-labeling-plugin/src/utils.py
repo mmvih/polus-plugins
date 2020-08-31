@@ -65,22 +65,22 @@ def squeeze_generic(a, axes_to_keep):
     return a.reshape(out_s)
 
 def _mode2(image, dtype):
-    """ Finds the mode of pixels together with optical field 2x2 and stride 2
+    """ Finds the mode of pixels together with optical field 2x2x2 and stride 2
     
     Inputs:
-        image - numpy array with only two dimensions (m,n)
+        image - numpy array with only three dimensions (m,n,p)
         datatype - datatype of image pixels
     Outputs:
-        avg_img - numpy array with only two dimensions (round(m/2),round(n/2))
+        _mode_img - numpy array with eight dimensions (round(m/2),round(n/2),round(p/2))
     """
 
     """ Find mode of pixels in optical field 2x2 and stride 2
     This method works by finding the largest number that occurs at least twice
-    in a 2x2 grid of pixels, then sets that value to the output pixel.
+    in a 2x2x2 grid of pixels, then sets that value to the output pixel.
     Inputs:
-        image - numpy array with only two dimensions (m,n)
+        image - numpy array with three dimensions (m,n,p)
     Outputs:
-        mode_img - numpy array with only two dimensions (round(m/2),round(n/2))
+        mode_img - numpy array with only two dimensions (round(m/2),round(n/2),round(p/2))
     """
     def forloop(mode_img, idxfalse, vals):
 
@@ -103,10 +103,10 @@ def _mode2(image, dtype):
     mode_imgshape = np.ceil([d/2 for d in imgshape]).astype('int')
     mode_img = np.zeros(mode_imgshape).astype(dtype)
 
-    # Garnering the four different pixels that we would find the modes of
+    # Garnering the eight different pixels that we would find the modes of
     # Finding the mode of: 
-    # vals00[1], vals01[1], vals10[1], vals11[1] 
-    # vals00[2], vals01[2], vals10[2], vals11[2]
+    # vals000[1], vals010[1], vals100[1], vals110[1], vals001[1], vals011[1], vals101[1], vals111[1]
+    # vals000[2], vals010[2], vals100[2], vals110[2], vals001[2], vals011[2], vals101[2], vals111[2]
     # etc 
     vals000 = image[0:-1:2, 0:-1:2,0:-1:2]
     vals010 = image[0:-1:2, 1::2,0:-1:2]
