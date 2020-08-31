@@ -150,46 +150,6 @@ def _mode2(image, dtype):
         mode_edges[edges] = shortmode_img
         return mode_edges[edges]
 
-    # if y_edge == 1 and x_edge == 0 and z_edge == 0:
-    #     shortmode_img = mode_img[:-1,:,:]
-    #     shortmode_img[indextrue] = vals000[indextrue]
-    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
-    #     mode_img[:-1,:,:] = shortmode_img
-    # elif y_edge == 0 and x_edge == 1 and z_edge == 0:
-    #     shortmode_img = mode_img[:,:-1,:]
-    #     shortmode_img[indextrue] = vals000[indextrue]
-    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
-    #     mode_img[:,:-1,:] = shortmode_img
-    # elif y_edge == 1 and x_edge == 1 and z_edge == 0:
-    #     shortmode_img = mode_img[:-1,:-1,:]
-    #     shortmode_img[indextrue] = vals000[indextrue]
-    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
-    #     mode_img[:-1,:-1,:] = shortmode_img
-    # elif y_edge == 0 and x_edge == 0 and z_edge == 1:
-    #     shortmode_img = mode_img[:,:,:-1]
-    #     shortmode_img[indextrue] = vals000[indextrue]
-    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
-    #     mode_img[:,:,:-1] = shortmode_img
-    # elif y_edge == 1 and x_edge == 0 and z_edge == 1:
-    #     shortmode_img = mode_img[:-1,:,:-1]
-    #     shortmode_img[indextrue] = vals000[indextrue]
-    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
-    #     mode_img[:-1,:,:-1] = shortmode_img
-    # elif y_edge == 0 and x_edge == 1 and z_edge == 1:
-    #     shortmode_img = mode_img[:,:-1,:-1]
-    #     shortmode_img[indextrue] = vals000[indextrue]
-    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
-    #     mode_img[:,:-1,:-1] = shortmode_img
-    # elif y_edge == 1 and x_edge == 1 and z_edge == 1:
-    #     shortmode_img = mode_img[:-1,:-1,:-1]
-    #     shortmode_img[indextrue] = vals000[indextrue]
-    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
-    #     mode_img[:-1,:-1,:-1] = shortmode_img
-    # else:
-    #     mode_img[indextrue] = vals000[indextrue]
-    #     mode_img = forloop(mode_img, indexfalse, valueslist)
-
-    return mode_edges[edges]
 
 def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, X=None,Y=None,Z=None):
     """ Recursive function for pyramid building
