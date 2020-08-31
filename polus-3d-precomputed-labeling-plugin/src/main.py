@@ -3,7 +3,6 @@ from pathlib import Path
 import filepattern
 import os
 from filepattern import FilePattern as fp
-# import tifffile as tiff
 import numpy as np
 
 
@@ -36,18 +35,6 @@ def main():
     pyramid_type = args.pyramid_type
     imagepattern = args.image_pattern
     imagetype = args.image_type
-
-    # Get Variables of Images
-    # regex = filepattern.get_regex(pattern = imagepattern)
-    # regexzero = regex[0]
-    # regexone = regex[1]
-    # vars_instack = ''
-    # stack_by = ''
-    # for item in regexone:
-    #     if (item == 'x' or item == 'y') or item == 'z':
-    #         vars_instack = vars_instack + item
-    #     else:
-    #         stack_by = stack_by + item
 
     logger.info('input_dir = {}'.format(input_dir))
     logger.info('output_dir = {}'.format(output_dir))
