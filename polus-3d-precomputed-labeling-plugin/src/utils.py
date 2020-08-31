@@ -7,6 +7,7 @@ import filepattern
 import os
 import logging
 import math
+from concurrent.futures import ThreadPoolExecutor
 
 # Conversion factors to nm, these are based off of supported Bioformats length units
 UNITS = {'m':  10**9,
@@ -18,6 +19,11 @@ UNITS = {'m':  10**9,
 
 # Chunk Scale
 CHUNK_SIZE = 128
+
+def image_generator(image):
+    mesh = image.ravel()
+    ids = [int(i) for i in np.unique(mesh[:])]
+    return ids
 
 def segmentinfo(encoder,idlabels,out_dir):
 
@@ -58,50 +64,134 @@ def squeeze_generic(a, axes_to_keep):
     out_s = [s for i,s in enumerate(a.shape) if i in axes_to_keep or s!=1]
     return a.reshape(out_s)
 
-def _avg2(image):
-    """ Average pixels together with optical field 2x2 and stride 2
+def _mode2(image, dtype):
+    """ Finds the mode of pixels together with optical field 2x2 and stride 2
+    
     Inputs:
         image - numpy array with only two dimensions (m,n)
+        datatype - datatype of image pixels
     Outputs:
         avg_img - numpy array with only two dimensions (round(m/2),round(n/2))
     """
-    image = image.astype('uint64')
+
+    """ Find mode of pixels in optical field 2x2 and stride 2
+    This method works by finding the largest number that occurs at least twice
+    in a 2x2 grid of pixels, then sets that value to the output pixel.
+    Inputs:
+        image - numpy array with only two dimensions (m,n)
+    Outputs:
+        mode_img - numpy array with only two dimensions (round(m/2),round(n/2))
+    """
+    def forloop(mode_img, idxfalse, vals):
+
+        for i in range(7):
+            rvals = vals[i]
+            for j in range(i+1,8):
+                cvals = vals[j]
+                ind = np.logical_and(cvals==rvals,rvals>mode_img[idxfalse])
+                mode_img[idxfalse][ind] = rvals[ind]
+        return mode_img
+
     imgshape = image.shape
-    ypos = imgshape[0]
-    xpos = imgshape[1]
-    zpos = imgshape[2]
-    z_max = zpos - zpos % 2    # if even then subtracting 0. 
-    y_max = ypos - ypos % 2 # if odd then subtracting 1
-    x_max = xpos - xpos % 2
-    yxz_max = [y_max, x_max, z_max]
+    ypos, xpos, zpos = imgshape
 
-    avg_imgshape = [d/2 for d in imgshape]
-    avg_img = np.zeros(np.ceil(avg_imgshape).astype('int'))
-    avg_img[0:int(y_max/2),0:int(x_max/2),0:int(z_max/2)]= (\
-                                                image[0:y_max-1:2,0:x_max-1:2,0:z_max-1:2] + \
-                                                image[1:y_max:2  ,0:x_max-1:2,0:z_max-1:2] + \
-                                                image[0:y_max-1:2,1:x_max:2  ,0:z_max-1:2] + \
-                                                image[1:y_max:2  ,1:x_max:2  ,0:z_max-1:2] + \
-                                                image[0:y_max-1:2,0:x_max-1:2,1:z_max:2] + \
-                                                image[1:y_max:2  ,0:x_max-1:2,1:z_max:2] + \
-                                                image[0:y_max-1:2,1:x_max:2  ,1:z_max:2] + \
-                                                image[1:y_max:2  ,1:x_max:2  ,1:z_max:2])/8
+    y_edge = ypos % 2
+    x_edge = xpos % 2
+    z_edge = zpos % 2
 
-    if z_max != image.shape[2]:
-        avg_img[-1,-1,:int(z_max/2)] = (image[-1,-1,0:z_max-1:2] + \
-                           image[-1,-1,1:z_max:2])/2
-    if y_max != image.shape[0]:
-        avg_img[-1,:int(x_max/2),-1] = (image[-1,0:x_max-1:2,-1] + \
-                                     image[-1,1:x_max:2,-1])/2
-    if x_max != image.shape[1]:
-        avg_img[:int(y_max/2),-1,-1] = (image[0:y_max-1:2,-1,-1] + \
-                                     image[1:y_max:2,-1,-1]) / 2
-    if (y_max != image.shape[0] and x_max != image.shape[1]) and (z_max != image.shape[2]):
-        avg_img[-1,-1,-1] = image[-1,-1,-1]
+    # Initialize the mode output image (Half the size)
+    mode_imgshape = np.ceil([d/2 for d in imgshape]).astype('int')
+    mode_img = np.zeros(mode_imgshape).astype(dtype)
 
-    return avg_img
+    # Garnering the four different pixels that we would find the modes of
+    # Finding the mode of: 
+    # vals00[1], vals01[1], vals10[1], vals11[1] 
+    # vals00[2], vals01[2], vals10[2], vals11[2]
+    # etc 
+    vals000 = image[0:-1:2, 0:-1:2,0:-1:2]
+    vals010 = image[0:-1:2, 1::2,0:-1:2]
+    vals100 = image[1::2,   0:-1:2,0:-1:2]
+    vals110 = image[1::2,   1::2,0:-1:2]
+    vals001 = image[0:-1:2, 0:-1:2,1::2]
+    vals011 = image[0:-1:2, 1::2,1::2]
+    vals101 = image[1::2,   0:-1:2,1::2]
+    vals111 = image[1::2,   1::2,1::2]
 
-def _get_higher_res(S, bfio_reader,slide_writer,encoder, X=None,Y=None,Z=None):
+    # Finding all quadrants where at least two of the pixels are the same
+    index = ((vals000 == vals010) & (vals000 == vals100)) & (vals000 == vals110) 
+    indexfalse = index==False
+    indextrue = index==True
+
+    # Going to loop through the indexes where the two pixels are not the same
+    valueslist = [vals000[indexfalse], vals010[indexfalse], vals100[indexfalse], vals110[indexfalse], vals001[indexfalse], vals011[indexfalse], vals101[indexfalse], vals111[indexfalse]]
+    edges = (y_edge,x_edge,z_edge)
+
+    mode_edges = {
+        (0,0,0): mode_img[:, :, :],
+        (0,1,0): mode_img[:,:-1,:],
+        (1,0,0): mode_img[:-1,:,:],
+        (1,1,0): mode_img[:-1,:-1,:],
+        (0,0,1): mode_img[:,:,:-1],
+        (0,1,1): mode_img[:,:-1,:-1],
+        (1,0,1): mode_img[:-1,:,:-1],
+        (1,1,1): mode_img[:-1, :-1, :-1]
+    }
+    # Edge cases, if there are an odd number of pixels in a row or column, then we ignore the last row or column
+    # Those columns will be black
+
+    if edges == (0,0,0):
+        mode_img[indextrue] = vals000[indextrue]
+        mode_img = forloop(mode_img, indexfalse, valueslist)
+        return mode_img
+    else:
+        shortmode_img = mode_edges[edges]
+        shortmode_img[indextrue] = vals000[indextrue]
+        shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
+        mode_edges[edges] = shortmode_img
+        return mode_edges[edges]
+
+    # if y_edge == 1 and x_edge == 0 and z_edge == 0:
+    #     shortmode_img = mode_img[:-1,:,:]
+    #     shortmode_img[indextrue] = vals000[indextrue]
+    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
+    #     mode_img[:-1,:,:] = shortmode_img
+    # elif y_edge == 0 and x_edge == 1 and z_edge == 0:
+    #     shortmode_img = mode_img[:,:-1,:]
+    #     shortmode_img[indextrue] = vals000[indextrue]
+    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
+    #     mode_img[:,:-1,:] = shortmode_img
+    # elif y_edge == 1 and x_edge == 1 and z_edge == 0:
+    #     shortmode_img = mode_img[:-1,:-1,:]
+    #     shortmode_img[indextrue] = vals000[indextrue]
+    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
+    #     mode_img[:-1,:-1,:] = shortmode_img
+    # elif y_edge == 0 and x_edge == 0 and z_edge == 1:
+    #     shortmode_img = mode_img[:,:,:-1]
+    #     shortmode_img[indextrue] = vals000[indextrue]
+    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
+    #     mode_img[:,:,:-1] = shortmode_img
+    # elif y_edge == 1 and x_edge == 0 and z_edge == 1:
+    #     shortmode_img = mode_img[:-1,:,:-1]
+    #     shortmode_img[indextrue] = vals000[indextrue]
+    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
+    #     mode_img[:-1,:,:-1] = shortmode_img
+    # elif y_edge == 0 and x_edge == 1 and z_edge == 1:
+    #     shortmode_img = mode_img[:,:-1,:-1]
+    #     shortmode_img[indextrue] = vals000[indextrue]
+    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
+    #     mode_img[:,:-1,:-1] = shortmode_img
+    # elif y_edge == 1 and x_edge == 1 and z_edge == 1:
+    #     shortmode_img = mode_img[:-1,:-1,:-1]
+    #     shortmode_img[indextrue] = vals000[indextrue]
+    #     shortmode_img = forloop(shortmode_img, indexfalse, valueslist)
+    #     mode_img[:-1,:-1,:-1] = shortmode_img
+    # else:
+    #     mode_img[indextrue] = vals000[indextrue]
+    #     mode_img = forloop(mode_img, indexfalse, valueslist)
+
+    return mode_edges[edges]
+
+def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, X=None,Y=None,Z=None):
     """ Recursive function for pyramid building
     
     This is a recursive function that builds an image pyramid by indicating
@@ -139,6 +229,7 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder, X=None,Y=None,Z=None):
     Outputs:
         image - The image corresponding to the X,Y values at scale S
     """
+
     # Get the scale info
     scale_info = None
     for res in encoder.info['scales']:
@@ -161,13 +252,28 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder, X=None,Y=None,Z=None):
         Y[1] = scale_info['size'][1]
     if Z[1] > scale_info['size'][2]:
         Z[1] = scale_info['size'][2]
-    # print("Length of Smallest Size Array", len(smallestsize))
+
     # Initialize the output
-    image = np.zeros((Y[1]-Y[0],X[1]-X[0], Z[1]-Z[0]),dtype=bfio_reader.read_metadata().image().Pixels.get_PixelType())
+    datatype = bfio_reader.read_metadata().image().Pixels.get_PixelType()
+    image = np.zeros((Y[1]-Y[0],X[1]-X[0],Z[1]-Z[0]),dtype=datatype)
+    
     # If requesting from the lowest scale, then just read the image
     if str(S)==encoder.info['scales'][0]['key']:
-        image = bfio_reader.read_image(X=X,Y=Y,Z=Z)
-        image = squeeze_generic(image, axes_to_keep=(0, 1, 2))
+        image = bfio_reader.read_image(X=X,Y=Y,Z=Z)[...,0,0] 
+        compareto = image_generator(image)
+        if len(ids) == 0:
+            ids.extend(compareto)
+        else:
+            difference = set(compareto) - set(ids)
+            ids.extend(difference)
+            ids.sort()
+
+        # Encode the chunk
+        image_encoded = encoder.encode(image, bfio_reader.num_z())
+        # Write the chunk
+        slide_writer.store_chunk(image_encoded,str(S),(X[0],X[1],Y[0],Y[1],Z[0],Z[1]))
+        return image
+
     else:
         # Set the subgrid dimensions
         subgrid_dims = [[2*X[0],2*X[1]],[2*Y[0],2*Y[1]],[2*Z[0],2*Z[1]]]
@@ -175,33 +281,41 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder, X=None,Y=None,Z=None):
             while dim[1]-dim[0] > CHUNK_SIZE:
                 dim.insert(1,dim[0] + ((dim[1] - dim[0]-1)//CHUNK_SIZE) * CHUNK_SIZE)
         
-        for z in range(0, len(subgrid_dims[2]) - 1):
-            z_ind = [subgrid_dims[2][z] - subgrid_dims[2][0],subgrid_dims[2][z+1] - subgrid_dims[2][0]]
-            z_ind = [np.ceil(zi/2).astype('int') for zi in z_ind]
-            for y in range(0,len(subgrid_dims[1])-1):
-                y_ind = [subgrid_dims[1][y] - subgrid_dims[1][0],subgrid_dims[1][y+1] - subgrid_dims[1][0]]
-                y_ind = [np.ceil(yi/2).astype('int') for yi in y_ind]
-                for x in range(0,len(subgrid_dims[0])-1):
-                    x_ind = [subgrid_dims[0][x] - subgrid_dims[0][0],subgrid_dims[0][x+1] - subgrid_dims[0][0]]
-                    x_ind = [np.ceil(xi/2).astype('int') for xi in x_ind]
-                    sub_image = _get_higher_res(X=subgrid_dims[0][x:x+2],
-                                                Y=subgrid_dims[1][y:y+2],
-                                                Z=subgrid_dims[2][z:z+2],
-                                                S=S+1,
-                                                bfio_reader=bfio_reader,
-                                                slide_writer=slide_writer,
-                                                encoder=encoder)
-                    # print("Sub_Image Shape: ", sub_image.shape)
-                    # print("Trying to fit into: ", image[y_ind[0]:y_ind[1],x_ind[0]:x_ind[1],z_ind[0]:z_ind[1]].shape)
-                    image[y_ind[0]:y_ind[1],x_ind[0]:x_ind[1],z_ind[0]:z_ind[1]] = _avg2(sub_image)
+        def load_and_scale(*args,**kwargs):
+            sub_image = _get_higher_res(**kwargs)
+            image = args[0]
+            x_ind = args[1]
+            y_ind = args[2]
+            z_ind = args[3]
+            image[y_ind[0]:y_ind[1],x_ind[0]:x_ind[1],z_ind[0]:z_ind[1]] = _mode2(sub_image, datatype)
+        
+        with ThreadPoolExecutor() as executor:
+            for z in range(0, len(subgrid_dims[2]) - 1):
+                z_ind = [subgrid_dims[2][z] - subgrid_dims[2][0],subgrid_dims[2][z+1] - subgrid_dims[2][0]]
+                z_ind = [np.ceil(zi/2).astype('int') for zi in z_ind]
+                for y in range(0,len(subgrid_dims[1])-1):
+                    y_ind = [subgrid_dims[1][y] - subgrid_dims[1][0],subgrid_dims[1][y+1] - subgrid_dims[1][0]]
+                    y_ind = [np.ceil(yi/2).astype('int') for yi in y_ind]
+                    for x in range(0,len(subgrid_dims[0])-1):
+                        x_ind = [subgrid_dims[0][x] - subgrid_dims[0][0],subgrid_dims[0][x+1] - subgrid_dims[0][0]]
+                        x_ind = [np.ceil(xi/2).astype('int') for xi in x_ind]
+                        executor.submit(load_and_scale, 
+                                            image, x_ind, y_ind, z_ind, 
+                                            X=subgrid_dims[0][x:x+2],
+                                            Y=subgrid_dims[1][y:y+2],
+                                            Z=subgrid_dims[2][z:z+2],
+                                            S=S+1,
+                                            bfio_reader=bfio_reader,
+                                            slide_writer=slide_writer,
+                                            encoder=encoder,
+                                            ids=ids)
+                    
 
-    # Encode the chunk
-    image_encoded = encoder.encode(image, image.shape[2])
-    slide_writer.store_chunk(image_encoded,str(S),(X[0],X[1],Y[0],Y[1],Z[0],Z[1]))
-    print(S, str(X[0])+ "-" + str(X[1])+ "-" + str(Y[0]) + "_" + str(Y[1])+ "_" + str(Z[0]) + "-" + str(Z[1]))
-
-    # print(" ")
-    return image
+        # Encode the chunk
+        image_encoded = encoder.encode(image, image.shape[2])
+        slide_writer.store_chunk(image_encoded,str(S),(X[0],X[1],Y[0],Y[1],Z[0],Z[1]))
+        print(S, str(X[0])+ "-" + str(X[1])+ "-" + str(Y[0]) + "_" + str(Y[1])+ "_" + str(Z[0]) + "-" + str(Z[1]))
+        return image
 
 # Modified and condensed from FileAccessor class in neuroglancer-scripts
 # https://github.com/HumanBrainProject/neuroglancer-scripts/blob/master/src/neuroglancer_scripts/file_accessor.py
