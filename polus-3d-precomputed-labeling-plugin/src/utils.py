@@ -1,4 +1,6 @@
-from bfio.bfio import BioReader
+from bfio import BioReader, BioWriter
+import bioformats
+import javabridge as jutil
 import numpy as np
 import json, copy, os
 from pathlib import Path
@@ -8,6 +10,9 @@ import os
 import logging
 import math
 from concurrent.futures import ThreadPoolExecutor
+import shutil
+import threading
+from concurrent import futures
 
 # Conversion factors to nm, these are based off of supported Bioformats length units
 UNITS = {'m':  10**9,
@@ -18,7 +23,7 @@ UNITS = {'m':  10**9,
          'Å':  10**-1}
 
 # Chunk Scale
-CHUNK_SIZE = 128
+CHUNK_SIZE = 64
 
 def image_generator(image):
     mesh = image.ravel()
@@ -216,18 +221,20 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, X=None,Y=None,Z=Non
     # Initialize the output
     datatype = bfio_reader.read_metadata().image().Pixels.get_PixelType()
     image = np.zeros((Y[1]-Y[0],X[1]-X[0],Z[1]-Z[0]),dtype=datatype)
-    
+    # print("image shape before", image.shape)
     # If requesting from the lowest scale, then just read the image
     if str(S)==encoder.info['scales'][0]['key']:
         image = bfio_reader.read_image(X=X,Y=Y,Z=Z)[...,0,0] 
         compareto = image_generator(image)
+
+        # This if-else is to find the label ids of the images. 
         if len(ids) == 0:
             ids.extend(compareto)
         else:
             difference = set(compareto) - set(ids)
             ids.extend(difference)
             ids.sort()
-
+            
         # Encode the chunk
         image_encoded = encoder.encode(image, bfio_reader.num_z())
         # Write the chunk
@@ -242,23 +249,32 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, X=None,Y=None,Z=Non
                 dim.insert(1,dim[0] + ((dim[1] - dim[0]-1)//CHUNK_SIZE) * CHUNK_SIZE)
         
         def load_and_scale(*args,**kwargs):
+            # futures.shutdown(wait=True)
+            jutil.attach()
             sub_image = _get_higher_res(**kwargs)
+            # shutdown(wait=True)
+            jutil.detach()
             image = args[0]
             x_ind = args[1]
             y_ind = args[2]
             z_ind = args[3]
             image[y_ind[0]:y_ind[1],x_ind[0]:x_ind[1],z_ind[0]:z_ind[1]] = _mode2(sub_image, datatype)
         
-        with ThreadPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=1) as executor:
             for z in range(0, len(subgrid_dims[2]) - 1):
                 z_ind = [subgrid_dims[2][z] - subgrid_dims[2][0],subgrid_dims[2][z+1] - subgrid_dims[2][0]]
+                # print("Z index", z_ind)
                 z_ind = [np.ceil(zi/2).astype('int') for zi in z_ind]
                 for y in range(0,len(subgrid_dims[1])-1):
                     y_ind = [subgrid_dims[1][y] - subgrid_dims[1][0],subgrid_dims[1][y+1] - subgrid_dims[1][0]]
+                    # print("Y index", y_ind)
                     y_ind = [np.ceil(yi/2).astype('int') for yi in y_ind]
                     for x in range(0,len(subgrid_dims[0])-1):
                         x_ind = [subgrid_dims[0][x] - subgrid_dims[0][0],subgrid_dims[0][x+1] - subgrid_dims[0][0]]
+                        # print("X index", x_ind)
                         x_ind = [np.ceil(xi/2).astype('int') for xi in x_ind]
+                        # print(subgrid_dims[0][x:x+2],subgrid_dims[1][y:y+2],subgrid_dims[2][z:z+2])
+                        # print(" ")
                         executor.submit(load_and_scale, 
                                             image, x_ind, y_ind, z_ind, 
                                             X=subgrid_dims[0][x:x+2],
@@ -269,12 +285,14 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, X=None,Y=None,Z=Non
                                             slide_writer=slide_writer,
                                             encoder=encoder,
                                             ids=ids)
+                        
                     
 
         # Encode the chunk
         image_encoded = encoder.encode(image, image.shape[2])
         slide_writer.store_chunk(image_encoded,str(S),(X[0],X[1],Y[0],Y[1],Z[0],Z[1]))
         print(S, str(X[0])+ "-" + str(X[1])+ "-" + str(Y[0]) + "_" + str(Y[1])+ "_" + str(Z[0]) + "-" + str(Z[1]))
+        # executor.shutdown(wait=True)
         return image
 
 # Modified and condensed from FileAccessor class in neuroglancer-scripts
