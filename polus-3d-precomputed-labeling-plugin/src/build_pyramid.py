@@ -111,6 +111,5 @@ if __name__=="__main__":
             logger.info("Finished Segmentation Information File")
         
     finally:
-        logger.info("ERROR")
         jutil.kill_vm()
         
