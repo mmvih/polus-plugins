@@ -24,7 +24,7 @@ def main():
     parser.add_argument('--pyramidType', dest='pyramid_type', type=str,
                         help='Build a DeepZoom or Neuroglancer pyramid', required=True)
     parser.add_argument('--imagepattern', dest='image_pattern', type=str,
-                        help='Filepattern of the images in input', required=True)
+                        help='Filepattern of the images in input', required=False)
     parser.add_argument('--imageType', dest='image_type', type=str,
                         help='The type of image, image or segmentation', required=True)
 
