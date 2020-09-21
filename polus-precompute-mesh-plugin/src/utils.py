@@ -13,7 +13,11 @@ from concurrent.futures import ThreadPoolExecutor
 import shutil
 import threading
 from concurrent import futures
-
+import neuroglancer
+import pandas
+import traceback
+from numpy.linalg import matrix_rank
+import collections
 # Conversion factors to nm, these are based off of supported Bioformats length units
 UNITS = {'m':  10**9,
          'cm': 10**7,
@@ -27,15 +31,22 @@ CHUNK_SIZE = 64
 
 def image_generator(image):
     mesh = image.ravel()
+    # mesh = np.dstack(mesh)
+    # mesh = np.transpose(mesh, (2, 0, 1))
+    # mesh = [image]
     ids = [int(i) for i in np.unique(mesh[:])]
     return ids
 
 def segmentinfo(encoder,idlabels,out_dir):
 
+
     op = Path(out_dir).joinpath("infodir")
+    opmesh = Path(out_dir).joinpath("meshdir")
     # op = Path(encoder.info["segment_properties"])
     op.mkdir()
-    op = op.joinpath("info")
+    opmesh.mkdir()
+    op_info = op.joinpath("info")
+    opmesh_mesh = opmesh.joinpath("info")
 
     inlineinfo = {
         "ids":[str(item) for item in idlabels],
@@ -58,9 +69,34 @@ def segmentinfo(encoder,idlabels,out_dir):
         "inline": inlineinfo
     }
 
-    with open(op,'w') as writer:
+    infomesh = {
+        "@type": "neuroglancer_legacy_mesh"
+        # "vertex_quantization_bits": "10",
+        # "transform": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        # "lod_scale_multiplier": "1"
+    }
+    # idindex = {
+    #     "chunk_shape": "[64, 64, 64]",
+    #     "grid_origin": "[0, 0, 0]",
+    #     "num_lods": "",
+    #     "lod_scales": "1",
+    #     "vertex_offsets": "[0, 0, 0, 3]",
+    #     "num_fragments_per_lod": "1",
+    # }
+    # for id in idlabels:
+    #     opmesh_index = opmesh.joinpath(str(id) + ".index")
+    #     with open(opmesh_index, 'w') as writeid:
+    #         writeid.write("check")
+    #     writeid.close()
+
+
+    with open(op_info,'w') as writer:
         writer.write(json.dumps(info))
     writer.close()
+
+    with open(opmesh_mesh, 'w') as writemesh:
+        writemesh.write(json.dumps(infomesh))
+    writemesh.close()
 
     return op
 
@@ -156,7 +192,7 @@ def _mode2(image, dtype):
         return mode_edges[edges]
 
 
-def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, X=None,Y=None,Z=None):
+def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, X=None,Y=None,Z=None):
     """ Recursive function for pyramid building
     
     This is a recursive function that builds an image pyramid by indicating
@@ -224,17 +260,30 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, X=None,Y=None,Z=Non
     # print("image shape before", image.shape)
     # If requesting from the lowest scale, then just read the image
     if str(S)==encoder.info['scales'][0]['key']:
-        image = bfio_reader.read_image(X=X,Y=Y,Z=Z)[...,0,0] 
+        image = bfio_reader.read_image(X=X,Y=Y,Z=Z)[...,0,0]
         compareto = image_generator(image)
-
+        # mesh_list.append(image)
+        # mesh = np.transpose(image, (2, 0, 1))
+        # dim=neuroglancer.CoordinateSpace(
+        #     names=['x', 'y', 'z'],
+        #     units=['nm', 'nm', 'nm'],
+        #     scales=[10, 10, 10])
+        # vol = neuroglancer.LocalVolume(data=mesh, dimensions=dim)
+        # for Id in compareto[1:]:
+        #     mesh_data = vol.get_object_mesh(Id)
+        # print(vol.get_object_mesh(1))
+        
         # This if-else is to find the label ids of the images. 
         if len(ids) == 0:
             ids.extend(compareto)
+            # mesh_list = image
         else:
+            # mesh_list = np.stack((mesh_list,image.T), axis=1)
             difference = set(compareto) - set(ids)
             ids.extend(difference)
             ids.sort()
-
+        
+        
         # Encode the chunk
         image_encoded = encoder.encode(image, bfio_reader.num_z())
         # Write the chunk
@@ -284,7 +333,8 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, X=None,Y=None,Z=Non
                                             bfio_reader=bfio_reader,
                                             slide_writer=slide_writer,
                                             encoder=encoder,
-                                            ids=ids)
+                                            ids=ids,
+                                            mesh_list=mesh_list)
                         
                     
 
@@ -490,7 +540,8 @@ def bfio_metadata_to_slide_info(bfio_reader,outPath,stackheight,imagetype):
     # create a scales template, use the full resolution8
     scales = {
         "chunk_sizes":[[CHUNK_SIZE,CHUNK_SIZE,CHUNK_SIZE]],
-        "encoding":"raw",
+        "encoding":"compressed_segmentation",
+        "compressed_segmentation_block_size": [8,8,8],
         "key": str(num_scales),
         "resolution":resolution,
         "size":sizes,
@@ -500,11 +551,12 @@ def bfio_metadata_to_slide_info(bfio_reader,outPath,stackheight,imagetype):
     # initialize the json dictionary
     info = {
         "@type": "neuroglancer_multiscale_volume",
-        "data_type": dtype,
+        "data_type": "uint64",
         "num_channels":1,
         "scales": [scales],       # Will build scales below
         "type": imagetype,
-        "segment_properties": "infodir"
+        "segment_properties": "infodir",
+        "mesh": "meshdir"
     }
     
     for i in range(1,num_scales+1):

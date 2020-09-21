@@ -10,6 +10,7 @@ from filepattern import FilePattern as fp
 import itertools
 import numpy as np
 import os
+import neuroglancer
 
 if __name__=="__main__":
     # Setup the Argument parsing
@@ -65,6 +66,9 @@ if __name__=="__main__":
         bf = BioReader(pathbf)
         getimageshape = (bf.num_x(), bf.num_y(), bf.num_z(), bf.num_c(), bf.num_t())
         stackheight = bf.num_z()
+        logger.info("Image Shape {}".format(getimageshape))
+        
+        
 
         # Make the output directory
         if pyramid_type == "Neuroglancer":
@@ -100,15 +104,43 @@ if __name__=="__main__":
             file_writer = utils.DeepZoomWriter(out_dir)
         
         ids = []
+        mesh_list = []
         # Create the stacked images
         if pyramid_type == "Neuroglancer":
-            utils._get_higher_res(S=0, bfio_reader=bf,slide_writer=file_writer,encoder=encoder,ids=ids)
+            utils._get_higher_res(S=0, bfio_reader=bf,slide_writer=file_writer,encoder=encoder,ids=ids, mesh_list=mesh_list)
         logger.info("Finished precomputing ")
+        # print(mesh_list)
+        # for item in mesh_list:
+        #     print(item.shape)
 
         logger.info(ids)
         if imagetype == "segmentation":
             out_seginfo = utils.segmentinfo(encoder,ids,out_dir)
             logger.info("Finished Segmentation Information File")
+            # numpyid = np.array(ids)
+            # vol = neuroglancer.LocalVolume(data=numpyid, dimensions=25)
+        json_descriptor = '{{"fragments": "mesh.{}.{}"}}'
+        mesh_dir = Path(output_dir).joinpath(image).joinpath('meshdir')
+        imageread = bf.read_image()[...,0,0]
+        mesh = np.transpose(imageread, (2, 0, 1))
+        ids = [int(i) for i in np.unique(mesh[:])]
+        dim=neuroglancer.CoordinateSpace(
+            names=['x', 'y', 'z'],
+            units=['nm', 'nm', 'nm'],
+            scales=[10, 10, 10])
+        vol = neuroglancer.LocalVolume(data=mesh, dimensions=dim)
+        for Id in ids[1:]:
+            mesh_data = vol.get_object_mesh(Id)
+            index_dir = mesh_dir.joinpath('mesh.'+str(Id)+'.'+str(Id))
+            with open(index_dir, 'wb') as writeid:
+                writeid.write(mesh_data)
+            writeid.close()
+            with open(mesh_dir.joinpath(str(Id)+':0'), 'w') as ff:
+                ff.write(json_descriptor.format(Id, Id))
+            ff.close()
+            
+        
+
         
     finally:
         jutil.kill_vm()
