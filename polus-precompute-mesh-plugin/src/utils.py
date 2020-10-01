@@ -13,11 +13,13 @@ from concurrent.futures import ThreadPoolExecutor
 import shutil
 import threading
 from concurrent import futures
+import struct,json
 import neuroglancer
 import pandas
 import traceback
 from numpy.linalg import matrix_rank
 import collections
+from skimage import measure
 # Conversion factors to nm, these are based off of supported Bioformats length units
 UNITS = {'m':  10**9,
          'cm': 10**7,
@@ -37,14 +39,21 @@ def image_generator(image):
     ids = [int(i) for i in np.unique(mesh[:])]
     return ids
 
-def segmentinfo(encoder,idlabels,out_dir):
-
-
+def infofiles(encoder, out_dir):
     op = Path(out_dir).joinpath("infodir")
     opmesh = Path(out_dir).joinpath("meshdir")
     # op = Path(encoder.info["segment_properties"])
     op.mkdir()
     opmesh.mkdir()
+
+def segmentinfo(encoder,idlabels,out_dir):
+# def segmentinfo(encoder,out_dir):
+
+    op = Path(out_dir).joinpath("infodir")
+    opmesh = Path(out_dir).joinpath("meshdir")
+    # op = Path(encoder.info["segment_properties"])
+    op.mkdir()
+    # opmesh.mkdir()
     op_info = op.joinpath("info")
     opmesh_mesh = opmesh.joinpath("info")
 
@@ -142,7 +151,7 @@ def _mode2(image, dtype):
 
     # Initialize the mode output image (Half the size)
     mode_imgshape = np.ceil([d/2 for d in imgshape]).astype('int')
-    mode_img = np.zeros(mode_imgshape).astype(dtype)
+    mode_img = np.zeros(mode_imgshape).astype('uint64')
 
     # Garnering the eight different pixels that we would find the modes of
     # Finding the mode of: 
@@ -192,7 +201,7 @@ def _mode2(image, dtype):
         return mode_edges[edges]
 
 
-def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, X=None,Y=None,Z=None):
+def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, fragments, X=None,Y=None,Z=None):
     """ Recursive function for pyramid building
     
     This is a recursive function that builds an image pyramid by indicating
@@ -231,6 +240,10 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, X=None,Y
         image - The image corresponding to the X,Y values at scale S
     """
 
+    voxel_size = [np.float32(325),
+                np.float32(325),
+                np.float32(325)]
+    # print(voxel_size)
     # Get the scale info
     scale_info = None
     for res in encoder.info['scales']:
@@ -282,7 +295,44 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, X=None,Y
             difference = set(compareto) - set(ids)
             ids.extend(difference)
             ids.sort()
-        
+        # xyz_chunk = [X[0], Y[0], Z[0]]
+        # chunkval = 0
+        # for item in xyz_chunk:
+        #     if item == 0:
+        #         continue
+        #     else:
+        #         chunkval = item/CHUNK_SIZE + chunkval
+
+        for iden in ids:
+            # print(iden)
+            if iden == 0:
+                continue
+            try:
+                vertices,faces,_,_ = measure.marching_cubes_lewiner(image==iden,step_size=1)
+            except RuntimeError:
+                continue
+            # print(iden)
+            vertices = vertices[:,[1,0,2]].astype(np.float32)
+            vertices[:,0] = vertices[:,0]*voxel_size[0] + voxel_size[0]*np.float32(X[0])
+            vertices[:,1] = vertices[:,1]*voxel_size[1] + voxel_size[1]*np.float32(Y[0])
+            vertices[:,2] = vertices[:,2]*voxel_size[2] + voxel_size[2]*np.float32(Z[0])
+            # print('({}) ID: {}'.format(chunkiter, iden))
+            # print('({}) shape: {}'.format(chunkiter, vertices.shape))
+            # print('X {} -- Y {} -- Z {}'.format(X, Y, Z))
+            # print(iden, chunkval)
+            # # segmentinfo(encoder, ids, out_dir)
+            fragment_file = Path('./out/dA30_5_dA30.Labels.ome.tif/meshdir').joinpath('mesh.{}.{}-{}_{}-{}_{}-{}'.format(iden,X[0],X[1],Y[0],Y[1],Z[0],Z[1]))
+            print(str(fragment_file))
+            with open(str(fragment_file), 'wb') as meshfile:
+                        meshfile.write(struct.pack("<I",vertices.shape[0]))
+                        meshfile.write(vertices.astype('<f').tobytes(order="C"))
+                        meshfile.write(faces.astype("<I").tobytes(order="C"))
+            if iden not in fragments:
+                fragments[iden] = {'fragments': [fragment_file.name]}
+            else:
+                fragments[iden]['fragments'].append(fragment_file.name)
+        # chunkiter = chunkiter + 1
+            
         
         # Encode the chunk
         image_encoded = encoder.encode(image, bfio_reader.num_z())
@@ -308,6 +358,7 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, X=None,Y
             y_ind = args[2]
             z_ind = args[3]
             image[y_ind[0]:y_ind[1],x_ind[0]:x_ind[1],z_ind[0]:z_ind[1]] = _mode2(sub_image, datatype)
+            
         
         with ThreadPoolExecutor(max_workers=1) as executor:
             for z in range(0, len(subgrid_dims[2]) - 1):
@@ -334,7 +385,9 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, X=None,Y
                                             slide_writer=slide_writer,
                                             encoder=encoder,
                                             ids=ids,
-                                            mesh_list=mesh_list)
+                                            mesh_list=mesh_list,
+                                            fragments=fragments)
+
                         
                     
 
@@ -526,7 +579,7 @@ def bfio_metadata_to_slide_info(bfio_reader,outPath,stackheight,imagetype):
     #     phys_y = (325,'nm')
     # phys_z = bfio_reader.physical_size_z()
     # if None in phys_z:
-        # phys_z = ((phys_y[0] * UNITS[phys_y[1]] + phys_x[0] * UNITS[phys_x[1]])/2, 'nm')
+    #     phys_z = ((phys_y[0] * UNITS[phys_y[1]] + phys_x[0] * UNITS[phys_x[1]])/2, 'nm')
     phys_x = (325,'nm')
     phys_y = (325,'nm')
     phys_z = (325,'nm')
@@ -540,8 +593,8 @@ def bfio_metadata_to_slide_info(bfio_reader,outPath,stackheight,imagetype):
     # create a scales template, use the full resolution8
     scales = {
         "chunk_sizes":[[CHUNK_SIZE,CHUNK_SIZE,CHUNK_SIZE]],
-        "encoding":"compressed_segmentation",
-        "compressed_segmentation_block_size": [8,8,8],
+        "encoding": "raw",
+        # "compressed_segmentation_block_size": [8,8,8],
         "key": str(num_scales),
         "resolution":resolution,
         "size":sizes,
@@ -577,9 +630,14 @@ def bfio_metadata_to_slide_info(bfio_reader,outPath,stackheight,imagetype):
 def neuroglancer_info_file(bfio_reader,outPath, stackheight, imagetype):
     # Create an output path object for the info file
     op = Path(outPath).joinpath("info")
-    
     # Get pyramid info
     info = bfio_metadata_to_slide_info(bfio_reader,outPath,stackheight,imagetype)
+    
+    # op = Path(outPath).joinpath("infodir")
+    opmesh = Path(outPath).joinpath("meshdir")
+    # op = Path(encoder.info["segment_properties"])
+    # op.mkdir()
+    opmesh.mkdir()
 
     # Write the neuroglancer info file
     with open(op,'w') as writer:

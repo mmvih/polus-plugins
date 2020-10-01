@@ -12,6 +12,16 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger("main")
 logger.setLevel(logging.INFO)
 
+def str2bool(v):
+    if isinstance(v, bool):
+       return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def main():
     # Setup the Argument parsing
     logger.info("Parsing arguments...")
@@ -27,6 +37,8 @@ def main():
                         help='Filepattern of the images in input', required=False)
     parser.add_argument('--imageType', dest='image_type', type=str,
                         help='The type of image, image or segmentation', required=True)
+    parser.add_argument('--meshes', dest='meshes', type=str2bool, nargs='?',const=True,
+                        default=False,help='True or False')
 
     # Parse the arguments
     args = parser.parse_args()
@@ -35,6 +47,7 @@ def main():
     pyramid_type = args.pyramid_type
     imagepattern = args.image_pattern
     imagetype = args.image_type
+    boolmesh = args.meshes
 
     logger.info('input_dir = {}'.format(input_dir))
     logger.info('output_dir = {}'.format(output_dir))
@@ -77,13 +90,14 @@ def main():
             del processes[free_process]
             del process_timer[free_process]
         try:
-            processes.append(subprocess.Popen("python3 build_pyramid.py --inpDir '{}' --outDir '{}' --pyramidType '{}' --imageNum '{}' --imagepattern '{}' --image '{}' --imagetype {}".format(input_dir,
+            processes.append(subprocess.Popen("python3 build_pyramid.py --inpDir '{}' --outDir '{}' --pyramidType '{}' --imageNum '{}' --imagepattern '{}' --image '{}' --imagetype {} --meshes {}".format(input_dir,
                                                                                                                                                 output_dir,
                                                                                                                                                 pyramid_type,
                                                                                                                                                 im_count,
                                                                                                                                                 imagepattern,
                                                                                                                                                 image.name,
-                                                                                                                                                imagetype),
+                                                                                                                                                imagetype,
+                                                                                                                                                boolmesh),
                                                                                                                                             shell=True))
         except:
             raise Exception("Previous process in build-pyramid.py input is wrong")
