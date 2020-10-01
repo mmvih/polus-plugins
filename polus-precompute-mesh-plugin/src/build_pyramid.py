@@ -56,8 +56,6 @@ if __name__=="__main__":
     boolmesh = args.meshes
 
     try:
-
-        print("MESHES is ", boolmesh)
         # Initialize the logger    
         logging.basicConfig(format='%(asctime)s - %(name)s - {} - %(levelname)s - %(message)s'.format(image_num),
                             datefmt='%d-%b-%y %H:%M:%S')
@@ -92,10 +90,10 @@ if __name__=="__main__":
             out_dir = Path(output_dir).joinpath('{}_files'.format(image_num))
         out_dir.mkdir()
         out_dir = str(out_dir.absolute())
-        print(out_dir)
+
         # Create the output path and info file
         if pyramid_type == "Neuroglancer":
-            file_info = utils.neuroglancer_info_file(bf,out_dir,stackheight, imagetype)
+            file_info = utils.neuroglancer_info_file(bfio_reader=bf,outPath=out_dir,stackheight=stackheight,imagetype=imagetype, meshes=boolmesh)
         elif pyramid_type == "DeepZoom":
             file_info = utils.dzi_file(bf,out_dir,image_num)
         else:
@@ -125,44 +123,20 @@ if __name__=="__main__":
         fragments = {}
         # Create the stacked images
         if pyramid_type == "Neuroglancer":
-            utils._get_higher_res(S=0, bfio_reader=bf,slide_writer=file_writer,encoder=encoder,ids=ids, mesh_list=mesh_list, fragments=fragments)
+            utils._get_higher_res(S=0, bfio_reader=bf,slide_writer=file_writer,encoder=encoder,ids=ids, mesh_list=mesh_list, fragments=fragments, meshes=boolmesh, imagetype = imagetype)
         logger.info("Finished precomputing ")
-        # print(mesh_list)
-        # for item in mesh_list:
-        #     print(item.shape)
+
 
         logger.info(ids)
         if imagetype == "segmentation":
-            out_seginfo = utils.segmentinfo(encoder,ids,out_dir)
+            utils.infodir_files(encoder,ids,out_dir)
             logger.info("Finished Segmentation Information File")
 
         if boolmesh == True:
-        for ID,frag in fragments.items():
-            with open(Path(out_dir).joinpath('meshdir').joinpath('{}:0'.format(ID)), 'w') as ff:
-                ff.write(json.dumps(frag))
-            # numpyid = np.array(ids)
-            # vol = neuroglancer.LocalVolume(data=numpyid, dimensions=25)
-        # json_descriptor = '{{"fragments": "mesh.{}.{}"}}'
-        # mesh_dir = Path(output_dir).joinpath(image).joinpath('meshdir')
-        # imageread = bf.read_image()[...,0,0]
-        # mesh = np.transpose(imageread, (2, 0, 1))
-        # ids = [int(i) for i in np.unique(mesh[:])]
-        # dim=neuroglancer.CoordinateSpace(
-        #     names=['x', 'y', 'z'],
-        #     units=['nm', 'nm', 'nm'],
-        #     scales=[10, 10, 10])
-        # vol = neuroglancer.LocalVolume(data=mesh, dimensions=dim)
-        # for Id in ids[1:]:
-        #     mesh_data = vol.get_object_mesh(Id)
-        #     index_dir = mesh_dir.joinpath('mesh.'+str(Id)+'.'+str(Id))
-        #     with open(index_dir, 'wb') as writeid:
-        #         writeid.write(mesh_data)
-        #     writeid.close()
-        #     with open(mesh_dir.joinpath(str(Id)+':0'), 'w') as ff:
-        #         ff.write(json_descriptor.format(Id, Id))
-        #     ff.close()
-            
-        
+            utils.meshdir_files(out_dir)
+            for ID,frag in fragments.items():
+                with open(Path(out_dir).joinpath('meshdir').joinpath('{}:0'.format(ID)), 'w') as ff:
+                    ff.write(json.dumps(frag))
 
     except Exception as e:
         traceback.print_exc()

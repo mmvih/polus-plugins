@@ -39,23 +39,61 @@ def image_generator(image):
     ids = [int(i) for i in np.unique(mesh[:])]
     return ids
 
-def infofiles(encoder, out_dir):
-    op = Path(out_dir).joinpath("infodir")
-    opmesh = Path(out_dir).joinpath("meshdir")
-    # op = Path(encoder.info["segment_properties"])
-    op.mkdir()
-    opmesh.mkdir()
+def meshdata(image,ids,fragments, voxel_size):
+    for iden in ids:
+        if iden == 0:
+            continue
+        try:
+            vertices,faces,_,_ = measure.marching_cubes_lewiner(image==iden,step_size=1)
+        except RuntimeError:
+            continue
+        vertices = vertices[:,[1,0,2]].astype(np.float32)
+        vertices[:,0] = vertices[:,0]*voxel_size[0] + voxel_size[0]*np.float32(X[0])
+        vertices[:,1] = vertices[:,1]*voxel_size[1] + voxel_size[1]*np.float32(Y[0])
+        vertices[:,2] = vertices[:,2]*voxel_size[2] + voxel_size[2]*np.float32(Z[0])
+        
+        fragment_file = Path('./out/dA30_5_dA30.Labels.ome.tif/meshdir').joinpath('mesh.{}.{}-{}_{}-{}_{}-{}'.format(iden,X[0],X[1],Y[0],Y[1],Z[0],Z[1]))
+        with open(str(fragment_file), 'wb') as meshfile:
+                    meshfile.write(struct.pack("<I",vertices.shape[0]))
+                    meshfile.write(vertices.astype('<f').tobytes(order="C"))
+                    meshfile.write(faces.astype("<I").tobytes(order="C"))
+        if iden not in fragments:
+            fragments[iden] = {'fragments': [fragment_file.name]}
+        else:
+            fragments[iden]['fragments'].append(fragment_file.name)
 
-def segmentinfo(encoder,idlabels,out_dir):
+def meshdir_files(out_dir):
+    opmeshdir = Path(out_dir).joinpath("meshdir")
+    opmesh_mesh = opmeshdir.joinpath("info")
+    infomesh = {
+        "@type": "neuroglancer_legacy_mesh"
+        # "vertex_quantization_bits": "10",
+        # "transform": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        # "lod_scale_multiplier": "1"
+    }
+    # idindex = {
+    #     "chunk_shape": "[64, 64, 64]",
+    #     "grid_origin": "[0, 0, 0]",
+    #     "num_lods": "",
+    #     "lod_scales": "1",
+    #     "vertex_offsets": "[0, 0, 0, 3]",
+    #     "num_fragments_per_lod": "1",
+    # }
+    # for id in idlabels:
+    #     opmesh_index = opmeshdir.joinpath(str(id) + ".index")
+    #     with open(opmesh_index, 'w') as writeid:
+    #         writeid.write("check")
+    #     writeid.close()
+    with open(opmesh_mesh, 'w') as writemesh:
+        writemesh.write(json.dumps(infomesh))
+    writemesh.close()
+
+def infodir_files(encoder,idlabels,out_dir):
 # def segmentinfo(encoder,out_dir):
 
-    op = Path(out_dir).joinpath("infodir")
-    opmesh = Path(out_dir).joinpath("meshdir")
-    # op = Path(encoder.info["segment_properties"])
-    op.mkdir()
-    # opmesh.mkdir()
-    op_info = op.joinpath("info")
-    opmesh_mesh = opmesh.joinpath("info")
+    opinfodir = Path(out_dir).joinpath("infodir")
+    opinfo_info = opinfodir.joinpath("info")
+    
 
     inlineinfo = {
         "ids":[str(item) for item in idlabels],
@@ -78,37 +116,9 @@ def segmentinfo(encoder,idlabels,out_dir):
         "inline": inlineinfo
     }
 
-    infomesh = {
-        "@type": "neuroglancer_legacy_mesh"
-        # "vertex_quantization_bits": "10",
-        # "transform": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        # "lod_scale_multiplier": "1"
-    }
-    # idindex = {
-    #     "chunk_shape": "[64, 64, 64]",
-    #     "grid_origin": "[0, 0, 0]",
-    #     "num_lods": "",
-    #     "lod_scales": "1",
-    #     "vertex_offsets": "[0, 0, 0, 3]",
-    #     "num_fragments_per_lod": "1",
-    # }
-    # for id in idlabels:
-    #     opmesh_index = opmesh.joinpath(str(id) + ".index")
-    #     with open(opmesh_index, 'w') as writeid:
-    #         writeid.write("check")
-    #     writeid.close()
-
-
-    with open(op_info,'w') as writer:
+    with open(opinfo_info,'w') as writer:
         writer.write(json.dumps(info))
     writer.close()
-
-    with open(opmesh_mesh, 'w') as writemesh:
-        writemesh.write(json.dumps(infomesh))
-    writemesh.close()
-
-    return op
-
 
 def squeeze_generic(a, axes_to_keep):
     out_s = [s for i,s in enumerate(a.shape) if i in axes_to_keep or s!=1]
@@ -201,7 +211,7 @@ def _mode2(image, dtype):
         return mode_edges[edges]
 
 
-def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, fragments, X=None,Y=None,Z=None):
+def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, fragments, meshes, imagetype, X=None,Y=None,Z=None):
     """ Recursive function for pyramid building
     
     This is a recursive function that builds an image pyramid by indicating
@@ -240,11 +250,8 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, fragment
         image - The image corresponding to the X,Y values at scale S
     """
 
-    voxel_size = [np.float32(325),
-                np.float32(325),
-                np.float32(325)]
-    # print(voxel_size)
-    # Get the scale info
+    voxel_size = np.float32(encoder.info['scales'][0]['resolution'])
+
     scale_info = None
     for res in encoder.info['scales']:
         if int(res['key'])==S:
@@ -270,69 +277,24 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, fragment
     # Initialize the output
     datatype = bfio_reader.read_metadata().image().Pixels.get_PixelType()
     image = np.zeros((Y[1]-Y[0],X[1]-X[0],Z[1]-Z[0]),dtype=datatype)
-    # print("image shape before", image.shape)
+
     # If requesting from the lowest scale, then just read the image
     if str(S)==encoder.info['scales'][0]['key']:
         image = bfio_reader.read_image(X=X,Y=Y,Z=Z)[...,0,0]
-        compareto = image_generator(image)
-        # mesh_list.append(image)
-        # mesh = np.transpose(image, (2, 0, 1))
-        # dim=neuroglancer.CoordinateSpace(
-        #     names=['x', 'y', 'z'],
-        #     units=['nm', 'nm', 'nm'],
-        #     scales=[10, 10, 10])
-        # vol = neuroglancer.LocalVolume(data=mesh, dimensions=dim)
-        # for Id in compareto[1:]:
-        #     mesh_data = vol.get_object_mesh(Id)
-        # print(vol.get_object_mesh(1))
-        
-        # This if-else is to find the label ids of the images. 
-        if len(ids) == 0:
-            ids.extend(compareto)
-            # mesh_list = image
-        else:
-            # mesh_list = np.stack((mesh_list,image.T), axis=1)
-            difference = set(compareto) - set(ids)
-            ids.extend(difference)
-            ids.sort()
-        # xyz_chunk = [X[0], Y[0], Z[0]]
-        # chunkval = 0
-        # for item in xyz_chunk:
-        #     if item == 0:
-        #         continue
-        #     else:
-        #         chunkval = item/CHUNK_SIZE + chunkval
 
-        for iden in ids:
-            # print(iden)
-            if iden == 0:
-                continue
-            try:
-                vertices,faces,_,_ = measure.marching_cubes_lewiner(image==iden,step_size=1)
-            except RuntimeError:
-                continue
-            # print(iden)
-            vertices = vertices[:,[1,0,2]].astype(np.float32)
-            vertices[:,0] = vertices[:,0]*voxel_size[0] + voxel_size[0]*np.float32(X[0])
-            vertices[:,1] = vertices[:,1]*voxel_size[1] + voxel_size[1]*np.float32(Y[0])
-            vertices[:,2] = vertices[:,2]*voxel_size[2] + voxel_size[2]*np.float32(Z[0])
-            # print('({}) ID: {}'.format(chunkiter, iden))
-            # print('({}) shape: {}'.format(chunkiter, vertices.shape))
-            # print('X {} -- Y {} -- Z {}'.format(X, Y, Z))
-            # print(iden, chunkval)
-            # # segmentinfo(encoder, ids, out_dir)
-            fragment_file = Path('./out/dA30_5_dA30.Labels.ome.tif/meshdir').joinpath('mesh.{}.{}-{}_{}-{}_{}-{}'.format(iden,X[0],X[1],Y[0],Y[1],Z[0],Z[1]))
-            print(str(fragment_file))
-            with open(str(fragment_file), 'wb') as meshfile:
-                        meshfile.write(struct.pack("<I",vertices.shape[0]))
-                        meshfile.write(vertices.astype('<f').tobytes(order="C"))
-                        meshfile.write(faces.astype("<I").tobytes(order="C"))
-            if iden not in fragments:
-                fragments[iden] = {'fragments': [fragment_file.name]}
+        if imagetype == 'segmentation':
+            compareto = image_generator(image)
+
+            # This if-else is to find the label ids of the images. 
+            if len(ids) == 0:
+                ids.extend(compareto)
             else:
-                fragments[iden]['fragments'].append(fragment_file.name)
-        # chunkiter = chunkiter + 1
-            
+                difference = set(compareto) - set(ids)
+                ids.extend(difference)
+                ids.sort()
+
+            if meshes:
+                meshdata(image, ids, fragments, voxel_size)
         
         # Encode the chunk
         image_encoded = encoder.encode(image, bfio_reader.num_z())
@@ -386,7 +348,9 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, fragment
                                             encoder=encoder,
                                             ids=ids,
                                             mesh_list=mesh_list,
-                                            fragments=fragments)
+                                            fragments=fragments,
+                                            meshes=meshes,
+                                            imagetype=imagetype)
 
                         
                     
@@ -627,17 +591,18 @@ def bfio_metadata_to_slide_info(bfio_reader,outPath,stackheight,imagetype):
     
     return info
 
-def neuroglancer_info_file(bfio_reader,outPath, stackheight, imagetype):
+def neuroglancer_info_file(bfio_reader,outPath, stackheight, imagetype, meshes):
     # Create an output path object for the info file
     op = Path(outPath).joinpath("info")
     # Get pyramid info
     info = bfio_metadata_to_slide_info(bfio_reader,outPath,stackheight,imagetype)
     
-    # op = Path(outPath).joinpath("infodir")
-    opmesh = Path(outPath).joinpath("meshdir")
-    # op = Path(encoder.info["segment_properties"])
-    # op.mkdir()
-    opmesh.mkdir()
+    if imagetype == 'segmentation':
+        opinfo = Path(outPath).joinpath("infodir")
+        opinfo.mkdir()
+        if meshes:
+            opmesh = Path(outPath).joinpath("meshdir")
+            opmesh.mkdir()
 
     # Write the neuroglancer info file
     with open(op,'w') as writer:
