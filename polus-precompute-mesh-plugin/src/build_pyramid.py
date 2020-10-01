@@ -10,7 +10,6 @@ from filepattern import FilePattern as fp
 import itertools
 import numpy as np
 import os
-import neuroglancer
 import traceback
 import json
 
@@ -121,9 +120,10 @@ if __name__=="__main__":
         ids = []
         mesh_list = []
         fragments = {}
+        outDir_mesh = Path(out_dir).joinpath("meshdir")
         # Create the stacked images
         if pyramid_type == "Neuroglancer":
-            utils._get_higher_res(S=0, bfio_reader=bf,slide_writer=file_writer,encoder=encoder,ids=ids, mesh_list=mesh_list, fragments=fragments, meshes=boolmesh, imagetype = imagetype)
+            utils._get_higher_res(S=0, bfio_reader=bf,slide_writer=file_writer,encoder=encoder,ids=ids, mesh_list=mesh_list, fragments=fragments, meshes=boolmesh, imagetype = imagetype, outDir=outDir_mesh)
         logger.info("Finished precomputing ")
 
 

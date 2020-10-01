@@ -6,20 +6,19 @@ import json, copy, os
 from pathlib import Path
 import imageio
 import filepattern
-import os
+# import os
 import logging
-import math
+# import math
 from concurrent.futures import ThreadPoolExecutor
 import shutil
 import threading
 from concurrent import futures
 import struct,json
-import neuroglancer
-import pandas
-import traceback
 from numpy.linalg import matrix_rank
 import collections
 from skimage import measure
+import traceback
+
 # Conversion factors to nm, these are based off of supported Bioformats length units
 UNITS = {'m':  10**9,
          'cm': 10**7,
@@ -39,7 +38,7 @@ def image_generator(image):
     ids = [int(i) for i in np.unique(mesh[:])]
     return ids
 
-def meshdata(image,ids,fragments, voxel_size):
+def meshdata(image,ids,fragments, voxel_size, outDir, X, Y, Z):
     for iden in ids:
         if iden == 0:
             continue
@@ -52,7 +51,7 @@ def meshdata(image,ids,fragments, voxel_size):
         vertices[:,1] = vertices[:,1]*voxel_size[1] + voxel_size[1]*np.float32(Y[0])
         vertices[:,2] = vertices[:,2]*voxel_size[2] + voxel_size[2]*np.float32(Z[0])
         
-        fragment_file = Path('./out/dA30_5_dA30.Labels.ome.tif/meshdir').joinpath('mesh.{}.{}-{}_{}-{}_{}-{}'.format(iden,X[0],X[1],Y[0],Y[1],Z[0],Z[1]))
+        fragment_file = outDir.joinpath('mesh.{}.{}-{}_{}-{}_{}-{}'.format(iden,X[0],X[1],Y[0],Y[1],Z[0],Z[1]))
         with open(str(fragment_file), 'wb') as meshfile:
                     meshfile.write(struct.pack("<I",vertices.shape[0]))
                     meshfile.write(vertices.astype('<f').tobytes(order="C"))
@@ -161,7 +160,7 @@ def _mode2(image, dtype):
 
     # Initialize the mode output image (Half the size)
     mode_imgshape = np.ceil([d/2 for d in imgshape]).astype('int')
-    mode_img = np.zeros(mode_imgshape).astype('uint64')
+    mode_img = np.zeros(mode_imgshape).astype('uint16')
 
     # Garnering the eight different pixels that we would find the modes of
     # Finding the mode of: 
@@ -211,7 +210,7 @@ def _mode2(image, dtype):
         return mode_edges[edges]
 
 
-def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, fragments, meshes, imagetype, X=None,Y=None,Z=None):
+def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, fragments, meshes, imagetype, outDir, X=None,Y=None,Z=None):
     """ Recursive function for pyramid building
     
     This is a recursive function that builds an image pyramid by indicating
@@ -282,7 +281,7 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, fragment
     if str(S)==encoder.info['scales'][0]['key']:
         image = bfio_reader.read_image(X=X,Y=Y,Z=Z)[...,0,0]
 
-        if imagetype == 'segmentation':
+        if imagetype == "segmentation":
             compareto = image_generator(image)
 
             # This if-else is to find the label ids of the images. 
@@ -294,7 +293,10 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, fragment
                 ids.sort()
 
             if meshes:
-                meshdata(image, ids, fragments, voxel_size)
+                try:
+                    meshdata(image, ids, fragments, voxel_size, outDir, X, Y, Z)
+                except Exception as e:
+                    traceback.print_exc()
         
         # Encode the chunk
         image_encoded = encoder.encode(image, bfio_reader.num_z())
@@ -350,7 +352,8 @@ def _get_higher_res(S, bfio_reader,slide_writer,encoder,ids, mesh_list, fragment
                                             mesh_list=mesh_list,
                                             fragments=fragments,
                                             meshes=meshes,
-                                            imagetype=imagetype)
+                                            imagetype=imagetype,
+                                            outDir=outDir)
 
                         
                     
@@ -564,17 +567,27 @@ def bfio_metadata_to_slide_info(bfio_reader,outPath,stackheight,imagetype):
         "size":sizes,
         "voxel_offset":[0,0,0]
     }
+    info = {}
     
-    # initialize the json dictionary
-    info = {
-        "@type": "neuroglancer_multiscale_volume",
-        "data_type": "uint64",
-        "num_channels":1,
-        "scales": [scales],       # Will build scales below
-        "type": imagetype,
-        "segment_properties": "infodir",
-        "mesh": "meshdir"
-    }
+    if imagetype == "segmentation":
+        # initialize the json dictionary
+        info = {
+            "@type": "neuroglancer_multiscale_volume",
+            "data_type": dtype,
+            "num_channels":1,
+            "scales": [scales],       # Will build scales below
+            "type": imagetype,
+            "segment_properties": "infodir",
+            "mesh": "meshdir"
+        }
+    else:
+        info = {
+            "@type": "neuroglancer_multiscale_volume",
+            "data_type": dtype,
+            "num_channels":1,
+            "scales": [scales],       # Will build scales below
+            "type": imagetype
+        }
     
     for i in range(1,num_scales+1):
         previous_scale = info['scales'][-1]
@@ -597,7 +610,7 @@ def neuroglancer_info_file(bfio_reader,outPath, stackheight, imagetype, meshes):
     # Get pyramid info
     info = bfio_metadata_to_slide_info(bfio_reader,outPath,stackheight,imagetype)
     
-    if imagetype == 'segmentation':
+    if imagetype == "segmentation":
         opinfo = Path(outPath).joinpath("infodir")
         opinfo.mkdir()
         if meshes:

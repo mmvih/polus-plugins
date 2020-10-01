@@ -53,6 +53,7 @@ def main():
     logger.info('output_dir = {}'.format(output_dir))
     logger.info('pyramid_type = {}'.format(pyramid_type))
     logger.info('image pattern = {}'.format(imagepattern))
+    logger.info('meshes = {}'.format(boolmesh))
     # logger.info('images are stacked by variable(s) {}'.format(stack_by))
     
     # Get list of images that we are going to through
