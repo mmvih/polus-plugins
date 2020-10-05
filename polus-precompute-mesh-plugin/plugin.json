@@ -1,7 +1,7 @@
 {
   "name": "Polus 3D Mesh Labeling Plugin",
-  "version": "0.0.12",
-  "containerId": "mmvihani/polus-precompute-mesh-plugin:0.0.12",
+  "version": "0.0.18",
+  "containerId": "mmvihani/polus-precompute-mesh-plugin:0.0.18",
   "title": "PrecomputeMesh",
   "description": "Everything you need to start a WIPP plugin.",
   "author": "Data Scientist (data.scientist@labshare.org)",
@@ -47,7 +47,13 @@
         ]
       },
       "required": true
+    },
+    {
+      "name": "meshes",
+      "type": "boolean",
+      "description": "Create meshes"
     }
+
   ],
   "outputs": [
     {
@@ -73,6 +79,11 @@
       "key": "inputs.imageType",
       "title": "Image Type: ",
       "description": "Image or Segmentation?"
+    },
+    {
+      "key": "inputs.meshes",
+      "title": "Create meshes: ",
+      "default": "false"
     },
     {
       "key": "inputs.imagepattern",

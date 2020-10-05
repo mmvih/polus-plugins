@@ -80,8 +80,6 @@ if __name__=="__main__":
         stackheight = bf.num_z()
         logger.info("Image Shape {}".format(getimageshape))
         
-        
-
         # Make the output directory
         if pyramid_type == "Neuroglancer":
             out_dir = Path(output_dir).joinpath(image)
@@ -125,7 +123,6 @@ if __name__=="__main__":
         if pyramid_type == "Neuroglancer":
             utils._get_higher_res(S=0, bfio_reader=bf,slide_writer=file_writer,encoder=encoder,ids=ids, mesh_list=mesh_list, fragments=fragments, meshes=boolmesh, imagetype = imagetype, outDir=outDir_mesh)
         logger.info("Finished precomputing ")
-
 
         logger.info(ids)
         if imagetype == "segmentation":
