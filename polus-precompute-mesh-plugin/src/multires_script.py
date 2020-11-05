@@ -1,6 +1,6 @@
 import numpy as np
 import open3d as o3d
-import dlib
+# import dlib
 from pathlib import Path
 from skimage import measure
 
@@ -47,11 +47,11 @@ def lod_mesh_export(mesh, lods, extension, path):
     return mesh_lods, num_fragments_per_lod, fragment_positions
 
 
-input_path = Path('/home/ec2-user/3dtest')
+input_path = Path('/home/ubuntu/3D_data')
 dataname = input_path.joinpath('dA30_5_dA30.Labels.ome.tif')
 
 
-output_path = Path('/home/ec2-user/polusNEUROGLANCER/multi-resolution/polus-precompute-mesh-plugin/src/multi/')
+output_path = Path('/home/ubuntu/polus-plugins/polus-precompute-mesh-plugin/src/multi')
 # output_path.mkdir(exist_ok=True)
 
 
@@ -83,18 +83,33 @@ try:
     avg_dist = (np.mean(distances))
     radius = (3 * avg_dist)
 
-    bpa_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(pcd,o3d.utility.DoubleVector([radius, radius*2]))
-    numtri = 32
-    octree = o3d.geometry.Octree.convert_from_point_cloud(bpa_mesh, point_loud=pcd, size_expand=0.01)
-    print("Octree")
-    print(octree)
-    print(octree.size)
-    # axisaligned = o3d.geometry.AxisAlignedBoundingBox.get_axis_aligned_bounding_box(bpa_mesh)
-    # print("Axis Aligned")
-    # print("dimension", o3d.geometry.AxisAlignedBoundingBox.dimension(axisaligned))
-    # boxpoints = o3d.geometry.AxisAlignedBoundingBox.get_box_points(axisaligned)
-    # nparr = np.asarray(boxpoints)
-    # print(nparr)
+    # extract = pcd.o3d.pipelines.integration.ScalableTSDFVolume.extract_point_cloud()
+    """POISSON"""
+    # print(type(poisson_mesh), poisson_mesh)
+    print(len(vertices))
+    with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
+        poisson_mesh, poisson_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd=pcd, depth=3, scale=2, linear_fit=False)
+    print(poisson_mesh)
+    # print(poisson_densities)
+        
+    # print(extract)
+        # print(poisson_densities)
+        # print(o3d.utility.get_verbosity_level(0))
+
+    # for depth in poisson_mesh:
+    #     print(pose_graph.nodes[depth].pose)
+    # bbox = pcd.get_axis_aligned_bounding_box()
+    # p_mesh_crop = poisson_mesh.crop(bbox)
+    # print("Created Poisson Mesh")
+    # print(type(poisson_mesh), poisson_mesh)
+    # print(poisson_densities)
+
+    # oct = o3d.cpu.pybind.geometry.Octree.convert_from_point_cloud(point_cloud=pcd)
+
+    # o3d.io.write_triangle_mesh(output_path.joinpath("p_mesh_c.ply"), p_mesh_crop)
+
+    # bpa_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(pcd,o3d.utility.DoubleVector([radius, radius*2]))
+    # numtri = 32
 
     # dec_mesh = bpa_mesh.simplify_quadric_decimation(numtri)
     # dec_mesh.remove_degenerate_triangles()
@@ -105,38 +120,38 @@ try:
     # o3d.io.write_triangle_mesh(output_path+"bpa_mesh.ply", dec_mesh)
     # o3d.io.write_triangle_mesh(output_path+"p_mesh_c.ply", p_mesh_crop)
 
-    lods = [int(numtri), int(numtri/2), int(numtri/4), int(numtri/8)]
-    num_lods = len(lods)
-    lod_scales = np.asarray([1, 2, 4, 8]).astype(np.float32)
-    vertex_offsets = np.zeros(shape=(len(lod_scales),3))
-    for row in range(len(lod_scales)):
-        for col in range(3):
-            vertex_offsets[row][col] = lod_scales[row]/2
-    # print(vertex_offsets)
+    # lods = [int(numtri), int(numtri/2), int(numtri/4), int(numtri/8)]
+    # num_lods = len(lods)
+    # lod_scales = np.asarray([1, 2, 4, 8]).astype(np.float32)
+    # vertex_offsets = np.zeros(shape=(len(lod_scales),3))
+    # for row in range(len(lod_scales)):
+    #     for col in range(3):
+    #         vertex_offsets[row][col] = lod_scales[row]/2
+    # # print(vertex_offsets)
 
-    my_lods, num_fragments_per_lod, fragment_positions = lod_mesh_export(bpa_mesh, lods, ".obj", output_path)
-    # print(lods)
-    fragment_offsets = []
-    for item in num_fragments_per_lod:
-        appendzeros = np.zeros(item)
-        fragment_offsets.append(appendzeros)
-    for item in fragment_positions:
-        print(item)
+    # my_lods, num_fragments_per_lod, fragment_positions = lod_mesh_export(bpa_mesh, lods, ".obj", output_path)
+    # # print(lods)
+    # fragment_offsets = []
+    # for item in num_fragments_per_lod:
+    #     appendzeros = np.zeros(item)
+    #     fragment_offsets.append(appendzeros)
+    # for item in fragment_positions:
+    #     print(item)
 
-    manifest_file = output_path.joinpath((str(iden)+".index"))
-    with open(str(manifest_file), 'wb') as index:
-        index.write(struct.pack("<3f",1024.0,1024.0,1024.0))
-        index.write(struct.pack("<3f",0,0,0))
-        index.write(struct.pack("<I",num_lods))
-        index.write(lod_scales.astype('<f').tobytes(order="C"))
-        index.write(vertex_offsets.astype('<f').tobytes(order="C"))
-        index.write(num_fragments_per_lod.astype('<I').tobytes(order="C"))
-        for i in range(num_lods):
-            index.write(fragment_positions[i].astype('<I').tobytes(order="C"))
-            fragoff = fragment_offsets[i]
-            intlen = len(fragoff)
-            for item in fragoff:
-                index.write(struct.pack("<I",int(item)))
+    # manifest_file = output_path.joinpath((str(iden)+".index"))
+    # with open(str(manifest_file), 'wb') as index:
+    #     index.write(struct.pack("<3f",1024.0,1024.0,1024.0))
+    #     index.write(struct.pack("<3f",0,0,0))
+    #     index.write(struct.pack("<I",num_lods))
+    #     index.write(lod_scales.astype('<f').tobytes(order="C"))
+    #     index.write(vertex_offsets.astype('<f').tobytes(order="C"))
+    #     index.write(num_fragments_per_lod.astype('<I').tobytes(order="C"))
+    #     for i in range(num_lods):
+    #         index.write(fragment_positions[i].astype('<I').tobytes(order="C"))
+    #         fragoff = fragment_offsets[i]
+    #         intlen = len(fragoff)
+    #         for item in fragoff:
+    #             index.write(struct.pack("<I",int(item)))
         
 
 
