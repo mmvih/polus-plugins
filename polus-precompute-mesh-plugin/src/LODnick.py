@@ -59,6 +59,7 @@ Zorder = [
     [1, 1, 0], 
     [1, 1, 1]
 ]
+#checking to see if I login
 try:
     # Load the image
     br = BioReader(dataname,backend='java')
@@ -71,7 +72,7 @@ try:
     fragment_offset = 0
 
     # need to create a for loop for all the ids.
-    for iden in IDS[25:]:
+    for iden in IDS[1:]:
         print('Processing label {}'.format(iden))
         
         fragment_offsets = []
