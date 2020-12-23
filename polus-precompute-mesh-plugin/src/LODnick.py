@@ -38,8 +38,8 @@ with open(str(output_path.joinpath("info")), 'w') as info:
     jsoninfo = {
    "@type" : "neuroglancer_multilod_draco",
    "lod_scale_multiplier" : 1,
-   "transform" : [325,   0,   0,   325,
-                    0, 325,   0,   325,
+   "transform" : [0,   325,   0,   325,
+                    325, 0,   0,   325,
                     0,   0, 325,   325],
    "vertex_quantization_bits" : bit_depth 
     }
